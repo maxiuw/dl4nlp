@@ -2,6 +2,7 @@
 import torch, nltk, pickle
 from torch import nn
 from collections import Counter
+from tqdm import tqdm
 from transformers import BatchEncoding, PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutput
 
@@ -76,19 +77,18 @@ class A1Tokenizer:
         tok_texts = []
         attention_masks = []
         max_len = 0
-        for text_list in texts:
-            for text in text_list: # entry will be a separate sentence ?  
-                if return_tensors and return_tensors != 'pt':
-                    raise ValueError('Should be pt')
-                split_text = lowercase_tokenizer(text) # list of list of tokens
+        if return_tensors and return_tensors != 'pt':
+            raise ValueError('Should be pt')
+        for text in texts:
+            split_text = lowercase_tokenizer(text)
 
-                tok_text = [self.vocab['<BOS>']] + [self.vocab.get(t, self.vocab.get('<UNK>')) for t in split_text] \
-                    + [self.vocab["<EOS>"]]
-                tok_text = tok_text[:self.model_max_length] if truncation else tok_text
-                max_len = max(max_len, len(tok_text))
-                attention_mask = [1 if t != self.pad_token_id else 0 for t in tok_text]
-                tok_texts.append(tok_text)
-                attention_masks.append(attention_mask)       
+            tok_text = [self.vocab['<BOS>']] + [self.vocab.get(t, self.vocab.get('<UNK>')) for t in split_text] \
+                + [self.vocab["<EOS>"]]
+            tok_text = tok_text[:self.model_max_length] if (truncation and self.model_max_length) else tok_text
+            max_len = max(max_len, len(tok_text))
+            attention_mask = [1 if t != self.pad_token_id else 0 for t in tok_text]
+            tok_texts.append(tok_text)
+            attention_masks.append(attention_mask)       
         if padding: # to the max length ? no info about what is the desire size 
             for i in range(len(tok_texts)):
                 while len(tok_texts[i]) < max_len:
@@ -228,8 +228,8 @@ class A1Trainer:
             return torch.device('cpu')
         if torch.cuda.is_available():
             return torch.device('cuda')
-        if torch.mps.is_available():
-            return torch.device('mps')
+        # if torch.mps.is_available():
+        #     return torch.device('mps')
         return torch.device('cpu')
             
     def train(self):
@@ -270,14 +270,18 @@ class A1Trainer:
         #       optimizer.zero_grad()
         #       loss.backward()
         #       optimizer.step()
-        for epoch in range(args.num_train_epochs):
+        # for tqdm
+        print('Starting training...')
+        for epoch in tqdm(range(args.num_train_epochs)):
             self.model.train()
-            for batch in train_loader:
+            print(f'Training Epoch {epoch + 1}/{args.num_train_epochs}')
+            for batch in tqdm(train_loader, desc=f'Training Epoch {epoch + 1}/{args.num_train_epochs}'):
+                print(batch)
                 input_ids = self.tokenizer(batch, truncation=True, padding=True, return_tensors='pt')['input_ids'].to(device)
                 labels = input_ids.clone()
                 labels[labels == self.tokenizer.pad_token_id] = -100
                 outputs = self.model(input_ids=input_ids, labels=labels)
-                loss = outputs.loss
+                loss = loss_func(outputs.logits.view(-1, self.model.config.vocab_size), labels.view(-1))
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -301,7 +305,7 @@ class A1Trainer:
 if __name__ == '__main__':
     # create necessary objects and train 'train.txt' for trainign and 'val.txt' for validation
     print('Building tokenizer...')
-    tokenizer = build_tokenizer('train.txt')
+    tokenizer = build_tokenizer('train.txt', max_voc_size=100, model_max_length=256)
     config = A1RNNModelConfig(vocab_size=len(tokenizer), embedding_size=2, hidden_size=4)
     model = A1RNNModel(config)
     train_dataset = open('train.txt', 'r').readlines()
