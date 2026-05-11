@@ -140,7 +140,7 @@ class A1Tokenizer:
 
 class A1RNNModelConfig(PretrainedConfig):
     """Configuration object that stores hyperparameters that define the RNN-based language model."""
-    def __init__(self, vocab_size, embedding_size, hidden_size, **kwargs):
+    def __init__(self, vocab_size=0, embedding_size=0, hidden_size=0, **kwargs):
         super().__init__(**kwargs)
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
@@ -343,7 +343,7 @@ class A1Trainer:
             avg_loss = total_loss / len(self.eval_dataset)
             print(f'Epoch {epoch + 1}/{args.num_train_epochs}, Validation Loss: {avg_loss:.4f}')
         print(f'Saving to {args.output_dir}.')
-        self.model.save_pretrained(args.output_dir, vocab_size=self.model.config.vocab_size, embedding_size=self.model.config.embedding_size, hidden_size=self.model.config.hidden_size)
+        self.model.save_pretrained(args.output_dir)
 
     
 if __name__ == '__main__':
@@ -356,7 +356,7 @@ if __name__ == '__main__':
     eval_dataset = open('val.txt', 'r').readlines()
     # use a1 trainier for training
     class TrainingArguments:
-        def __init__(self, learning_rate=5e-5, num_train_epochs=3, per_device_train_batch_size=64, per_device_eval_batch_size=1, output_dir='output', optim='adamw_torch', eval_strategy='epoch', use_cpu=False):
+        def __init__(self, learning_rate=1e-3, num_train_epochs=3, per_device_train_batch_size=64, per_device_eval_batch_size=1, output_dir='output', optim='adamw_torch', eval_strategy='epoch', use_cpu=False):
             self.learning_rate = learning_rate
             self.num_train_epochs = num_train_epochs
             self.per_device_train_batch_size = per_device_train_batch_size
