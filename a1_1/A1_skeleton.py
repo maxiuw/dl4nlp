@@ -37,8 +37,10 @@ def build_tokenizer(train_file, tokenize_fun=lowercase_tokenizer, max_voc_size=N
     # Then return a tokenizer object (implemented below).
     f = open(train_file, 'r').read()
     counter = Counter(tokenize_fun(f))
-    sorted_tokens = list(counter.keys())
-    sorted_tokens.sort(key=lambda x: x[0], reverse=True)
+    # sorted_tokens = list(counter.keys())
+    sorted_tokens = [tok for tok, _ in counter.most_common()]
+
+    # sorted_tokens.sort(key=lambda x: x[0], reverse=True)
     # print(sorted_tokens[:10])
     # sorted_tokens  also cound use counter.most_common() 
     vocab = {}
@@ -174,7 +176,13 @@ class A1RNNModel(PreTrainedModel):
         rnn_out, _ = self.rnn(embedded)
         logits = self.unembedding(rnn_out)
         if labels is not None:
-            loss = self.loss_func(logits.view(-1, self.config.vocab_size), labels.view(-1))
+            shift_logits = logits[:, :-1, :].contiguous()
+            shift_labels = labels[:, 1:].contiguous()
+            loss = self.loss_func(
+                shift_logits.view(-1, self.config.vocab_size),
+                shift_labels.view(-1),
+)
+            # loss = self.loss_func(logits.view(-1, self.config.vocab_size), labels.view(-1))
 
         return CausalLMOutput(logits=logits, loss=loss)
 
@@ -198,6 +206,42 @@ class A1RNNModel(PreTrainedModel):
 # - per_device_eval_batch_size:
 #                     The batch size to use while evaluating.
 # - output_dir:       The directory where the trained model will be saved.
+def calculate_perplexity(model, eval_dataset, tokenizer, device=None):
+    if device is None:
+        device = next(model.parameters()).device
+    model.to(device)
+    model.eval()
+    total_loss = 0.0
+    total_tokens = 0
+    for batch in tqdm(eval_dataset, desc='Perplexity eval', unit='batch'):
+        with torch.no_grad():
+            input_ids = tokenizer(batch, truncation=True, padding=True, return_tensors='pt')['input_ids'].to(device)
+            labels = input_ids.clone()
+            labels[labels == tokenizer.pad_token_id] = -100
+            outputs = model(input_ids=input_ids, labels=labels)
+            # from hugging faces doc
+            # loss is calculated using CrossEntropyLoss which averages over valid labels
+            # N.B. the model only calculates loss over trg_len - 1 labels, because it internally shifts the labels
+            # to the left by 1.
+            n_tokens = (labels[:, 1:] != -100).sum().item()
+            total_loss += outputs.loss.item() * n_tokens
+            total_tokens += n_tokens
+    avg_loss = total_loss / max(total_tokens, 1)
+    perplexity = np.exp(avg_loss)
+    print(f'Validation Perplexity: {perplexity:.4f}')
+
+# another evaluation - find n nearest neighbors of a given word in the embedding space, and output these n words using cosine similarity
+def find_nearest_neighbors(model, tokenizer, word, n=5):
+    if word not in tokenizer.vocab:
+        print(f'Word "{word}" not found in vocabulary.')
+        return
+    word_id = tokenizer.vocab[word]
+    word_embedding = model.embedding.weight[word_id].detach().cpu().numpy()
+    embeddings = model.embedding.weight.detach().cpu().numpy()
+    cosine_similarities = np.dot(embeddings, word_embedding) / (np.linalg.norm(embeddings, axis=1) * np.linalg.norm(word_embedding))
+    nearest_indices = np.argsort(cosine_similarities)[-n-1:-1][::-1]  # Exclude the word itself
+    nearest_words = [list(tokenizer.vocab.keys())[list(tokenizer.vocab.values()).index(idx)] for idx in nearest_indices]
+    print(f'Nearest neighbors of "{word}": {nearest_words}')
 
 class A1Trainer:
     """A minimal implementation similar to a Trainer from the HuggingFace library."""
@@ -240,7 +284,7 @@ class A1Trainer:
         print('Device:', device)
         self.model.to(device)
         
-        loss_func = torch.nn.CrossEntropyLoss(ignore_index=self.tokenizer.pad_token_id)
+        # loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
 
         # TODO: Relevant arguments: at least args.learning_rate, but you can optionally also consider
         # other Adam-related hyperparameters here.
@@ -272,47 +316,47 @@ class A1Trainer:
         #       optimizer.step()
         # for tqdm
         print('Starting training...')
-        for epoch in tqdm(range(args.num_train_epochs)):
+        # calculate_perplexity(self.model, self.eval_dataset, self.tokenizer, device=device) # ie does another eval loop but fine 
+        # find_nearest_neighbors(self.model, self.tokenizer, 'sweden', n=5)
+        for epoch in range(args.num_train_epochs):
             self.model.train()
             print(f'Training Epoch {epoch + 1}/{args.num_train_epochs}')
-            for batch in tqdm(train_loader, desc=f'Training Epoch {epoch + 1}/{args.num_train_epochs}'):
-                print(batch)
+            for batch in tqdm(train_loader, desc=f'Train epoch {epoch + 1}/{args.num_train_epochs}', unit='batch'):
                 input_ids = self.tokenizer(batch, truncation=True, padding=True, return_tensors='pt')['input_ids'].to(device)
                 labels = input_ids.clone()
                 labels[labels == self.tokenizer.pad_token_id] = -100
-                outputs = self.model(input_ids=input_ids, labels=labels)
-                loss = loss_func(outputs.logits.view(-1, self.model.config.vocab_size), labels.view(-1))
+                loss = self.model(input_ids=input_ids, labels=labels).loss
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-            # EVALUATION:
-            #   After each epoch, evaluate the model on the validation set and print the validation loss.
             self.model.eval()
             total_loss = 0
             with torch.no_grad():
-                for batch in val_loader:
+                for batch in tqdm(val_loader, desc=f'Validate epoch {epoch + 1}/{args.num_train_epochs}', unit='batch'):
                     input_ids = self.tokenizer(batch, truncation=True, padding=True, return_tensors='pt')['input_ids'].to(device)
                     labels = input_ids.clone()
                     labels[labels == self.tokenizer.pad_token_id] = -100
                     outputs = self.model(input_ids=input_ids, labels=labels)
                     total_loss += outputs.loss.item() * input_ids.size(0)
+            calculate_perplexity(self.model, self.eval_dataset, self.tokenizer, device=device) # ie does another eval loop but fine 
+            find_nearest_neighbors(self.model, self.tokenizer, 'sweden', n=5)
             avg_loss = total_loss / len(self.eval_dataset)
             print(f'Epoch {epoch + 1}/{args.num_train_epochs}, Validation Loss: {avg_loss:.4f}')
         print(f'Saving to {args.output_dir}.')
-        self.model.save_pretrained(args.output_dir)
+        self.model.save_pretrained(args.output_dir, vocab_size=self.model.config.vocab_size, embedding_size=self.model.config.embedding_size, hidden_size=self.model.config.hidden_size)
 
     
 if __name__ == '__main__':
     # create necessary objects and train 'train.txt' for trainign and 'val.txt' for validation
     print('Building tokenizer...')
-    tokenizer = build_tokenizer('train.txt', max_voc_size=100, model_max_length=256)
-    config = A1RNNModelConfig(vocab_size=len(tokenizer), embedding_size=2, hidden_size=4)
+    tokenizer = build_tokenizer('train.txt', max_voc_size=50000) #, model_max_length=256)
+    config = A1RNNModelConfig(vocab_size=len(tokenizer), embedding_size=256, hidden_size=768)
     model = A1RNNModel(config)
     train_dataset = open('train.txt', 'r').readlines()
     eval_dataset = open('val.txt', 'r').readlines()
     # use a1 trainier for training
     class TrainingArguments:
-        def __init__(self, learning_rate=5e-5, num_train_epochs=3, per_device_train_batch_size=1, per_device_eval_batch_size=1, output_dir='output', optim='adamw_torch', eval_strategy='epoch', use_cpu=False):
+        def __init__(self, learning_rate=5e-5, num_train_epochs=3, per_device_train_batch_size=64, per_device_eval_batch_size=1, output_dir='output', optim='adamw_torch', eval_strategy='epoch', use_cpu=False):
             self.learning_rate = learning_rate
             self.num_train_epochs = num_train_epochs
             self.per_device_train_batch_size = per_device_train_batch_size
@@ -325,4 +369,5 @@ if __name__ == '__main__':
     print('Training...')
     trainer = A1Trainer(model, args, train_dataset, eval_dataset, tokenizer)
     trainer.train()
+    # calculate the perplexity on the validation set and print it out
     
