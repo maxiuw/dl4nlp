@@ -153,7 +153,7 @@ class A1RNNModel(PreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.embedding = nn.Embedding(config.vocab_size, config.embedding_size)
-        self.rnn = nn.RNN(config.embedding_size, config.hidden_size, batch_first=True)
+        self.rnn = nn.GRU(config.embedding_size, config.hidden_size, batch_first=True)
         self.unembedding = nn.Linear(config.hidden_size, config.vocab_size)
 
         # Note: -100 is the value HuggingFace conventionally uses to refer to tokens
@@ -289,6 +289,7 @@ class A1Trainer:
         # TODO: Relevant arguments: at least args.learning_rate, but you can optionally also consider
         # other Adam-related hyperparameters here.
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=args.learning_rate)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.num_train_epochs)
 
         # TODO: Relevant arguments: args.per_device_train_batch_size, args.per_device_eval_batch_size
         train_loader = DataLoader(
@@ -328,6 +329,7 @@ class A1Trainer:
                 loss = self.model(input_ids=input_ids, labels=labels).loss
                 optimizer.zero_grad()
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 optimizer.step()
             self.model.eval()
             total_loss = 0
@@ -338,6 +340,7 @@ class A1Trainer:
                     labels[labels == self.tokenizer.pad_token_id] = -100
                     outputs = self.model(input_ids=input_ids, labels=labels)
                     total_loss += outputs.loss.item() * input_ids.size(0)
+            scheduler.step()
             calculate_perplexity(self.model, self.eval_dataset, self.tokenizer, device=device) # ie does another eval loop but fine 
             find_nearest_neighbors(self.model, self.tokenizer, 'sweden', n=5)
             avg_loss = total_loss / len(self.eval_dataset)
