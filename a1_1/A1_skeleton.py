@@ -153,7 +153,8 @@ class A1RNNModel(PreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.embedding = nn.Embedding(config.vocab_size, config.embedding_size)
-        self.rnn = nn.GRU(config.embedding_size, config.hidden_size, batch_first=True)
+        # self.rnn = nn.GRU(config.embedding_size, config.hidden_size, batch_first=True)
+        self.rnn = nn.GRU(config.embedding_size, config.hidden_size, batch_first=True, num_layers=2, dropout=0.3) # mroe compelx for better resutls 
         self.unembedding = nn.Linear(config.hidden_size, config.vocab_size)
 
         # Note: -100 is the value HuggingFace conventionally uses to refer to tokens
@@ -333,16 +334,18 @@ class A1Trainer:
                 optimizer.step()
             self.model.eval()
             total_loss = 0
-            with torch.no_grad():
-                for batch in tqdm(val_loader, desc=f'Validate epoch {epoch + 1}/{args.num_train_epochs}', unit='batch'):
-                    input_ids = self.tokenizer(batch, truncation=True, padding=True, return_tensors='pt')['input_ids'].to(device)
-                    labels = input_ids.clone()
-                    labels[labels == self.tokenizer.pad_token_id] = -100
-                    outputs = self.model(input_ids=input_ids, labels=labels)
-                    total_loss += outputs.loss.item() * input_ids.size(0)
+            if epoch % 5 == 0: # or if you want to do it every few epochs
+                with torch.no_grad():
+                    for batch in tqdm(val_loader, desc=f'Validate epoch {epoch + 1}/{args.num_train_epochs}', unit='batch'):
+                        input_ids = self.tokenizer(batch, truncation=True, padding=True, return_tensors='pt')['input_ids'].to(device)
+                        labels = input_ids.clone()
+                        labels[labels == self.tokenizer.pad_token_id] = -100
+                        outputs = self.model(input_ids=input_ids, labels=labels)
+                        total_loss += outputs.loss.item() * input_ids.size(0)
             scheduler.step()
-            calculate_perplexity(self.model, self.eval_dataset, self.tokenizer, device=device) # ie does another eval loop but fine 
-            find_nearest_neighbors(self.model, self.tokenizer, 'sweden', n=5)
+            if epoch % 2 == 0: # or if you want to do it every few epochs
+                calculate_perplexity(self.model, self.eval_dataset, self.tokenizer, device=device) # ie does another eval loop but fine 
+                find_nearest_neighbors(self.model, self.tokenizer, 'sweden', n=5)
             avg_loss = total_loss / len(self.eval_dataset)
             print(f'Epoch {epoch + 1}/{args.num_train_epochs}, Validation Loss: {avg_loss:.4f}')
         print(f'Saving to {args.output_dir}.')
@@ -359,7 +362,7 @@ if __name__ == '__main__':
     eval_dataset = open('val.txt', 'r').readlines()
     # use a1 trainier for training
     class TrainingArguments:
-        def __init__(self, learning_rate=1e-3, num_train_epochs=3, per_device_train_batch_size=64, per_device_eval_batch_size=1, output_dir='output', optim='adamw_torch', eval_strategy='epoch', use_cpu=False):
+        def __init__(self, learning_rate=1e-3, num_train_epochs=10, per_device_train_batch_size=64, per_device_eval_batch_size=64, output_dir='output', optim='adamw_torch', eval_strategy='epoch', use_cpu=False):
             self.learning_rate = learning_rate
             self.num_train_epochs = num_train_epochs
             self.per_device_train_batch_size = per_device_train_batch_size
