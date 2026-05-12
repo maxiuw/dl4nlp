@@ -333,21 +333,9 @@ class A1Trainer:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 optimizer.step()
             self.model.eval()
-            total_loss = 0
-            if epoch % 5 == 0: # or if you want to do it every few epochs
-                with torch.no_grad():
-                    for batch in tqdm(val_loader, desc=f'Validate epoch {epoch + 1}/{args.num_train_epochs}', unit='batch'):
-                        input_ids = self.tokenizer(batch, truncation=True, padding=True, return_tensors='pt')['input_ids'].to(device)
-                        labels = input_ids.clone()
-                        labels[labels == self.tokenizer.pad_token_id] = -100
-                        outputs = self.model(input_ids=input_ids, labels=labels)
-                        total_loss += outputs.loss.item() * input_ids.size(0)
             scheduler.step()
-            if epoch % 2 == 0: # or if you want to do it every few epochs
-                calculate_perplexity(self.model, self.eval_dataset, self.tokenizer, device=device) # ie does another eval loop but fine 
-                find_nearest_neighbors(self.model, self.tokenizer, 'sweden', n=5)
-            avg_loss = total_loss / len(self.eval_dataset)
-            print(f'Epoch {epoch + 1}/{args.num_train_epochs}, Validation Loss: {avg_loss:.4f}')
+            calculate_perplexity(self.model, self.eval_dataset, self.tokenizer, device=device)
+            find_nearest_neighbors(self.model, self.tokenizer, 'sweden', n=5)
         print(f'Saving to {args.output_dir}.')
         self.model.save_pretrained(args.output_dir)
 
