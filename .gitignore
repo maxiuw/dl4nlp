@@ -1,5 +1,5 @@
 *.pth
-*.safetensor
+*.safetensors
 *.pkl
 a1_1/output
 

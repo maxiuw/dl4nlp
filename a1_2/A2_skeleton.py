@@ -2,22 +2,35 @@
 import torch
 from torch import nn
 from transformers import PreTrainedModel, PretrainedConfig
-from ..a1_1.A1_skeleton import build_tokenizer, A1Trainer
+from a1_1.A1_skeleton import build_tokenizer, A1Trainer
+from transformers.modeling_outputs import CausalLMOutput
 
 class A2ModelConfig(PretrainedConfig):
     """Configuration object that stores hyperparameters that define the Transformer language model."""
-    def __init__(self, vocab_size=None, hidden_size=None, intermediate_size=None, num_attention_heads=None, 
-                 num_hidden_layers=None,
-                 rope_theta=None, hidden_act='silu', max_position_embeddings=None, rms_norm_eps=None, **kwargs):
+    def __init__(
+        self,
+        vocab_size=None,
+        embedding_size=None,
+        hidden_size=None,
+        intermediate_size=None,
+        num_attention_heads=12,
+        num_hidden_layers=12,
+        rope_theta=10000.0,
+        hidden_act='silu',
+        max_position_embeddings=2048,
+        rms_norm_eps=1e-5,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.vocab_size = vocab_size
+        self.embedding_size = embedding_size
         self.hidden_size = hidden_size
         self.max_position_embeddings = max_position_embeddings
         self.rms_norm_eps = rms_norm_eps
         self.num_attention_heads = num_attention_heads
         self.rope_theta = rope_theta
         self.hidden_act = hidden_act
-        self.intermediate_size = intermediate_size
+        self.intermediate_size = intermediate_size if intermediate_size is not None else hidden_size * 4
         self.num_hidden_layers = num_hidden_layers
 
 
@@ -141,7 +154,7 @@ class A2Transformer(PreTrainedModel):
         loss = None
         if labels is not None:
             loss = nn.functional.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1), ignore_index=-100)
-        return logits, loss
+        return CausalLMOutput(loss=loss, logits=logits)
 
 
 #### RoPE implementation (copied and simplified from HuggingFace). ####
@@ -196,11 +209,11 @@ if __name__ == "__main__":
     # use trainig scheme from ../a1_1/A1_skeleton.pyif __name__ == '__main__':
     # create necessary objects and train 'train.txt' for trainign and 'val.txt' for validation
     print('Building tokenizer...')
-    tokenizer = build_tokenizer('train.txt', max_voc_size=50000) #, model_max_length=256)
+    tokenizer = build_tokenizer('../a1_1/train.txt', max_voc_size=50000) #, model_max_length=256)
     config = A2ModelConfig(vocab_size=len(tokenizer), embedding_size=256, hidden_size=768)
     model = A2Transformer(config)
-    train_dataset = open('train.txt', 'r').readlines()
-    eval_dataset = open('val.txt', 'r').readlines()
+    train_dataset = open('../a1_1/train.txt', 'r').readlines()
+    eval_dataset = open('../a1_1/val.txt', 'r').readlines()
     # use a1 trainier for training
     class TrainingArguments:
         def __init__(self, learning_rate=1e-3, num_train_epochs=10, per_device_train_batch_size=64, per_device_eval_batch_size=64, output_dir='output', optim='adamw_torch', eval_strategy='epoch', use_cpu=False):
