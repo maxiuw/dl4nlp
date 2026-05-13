@@ -30,7 +30,7 @@ class A2ModelConfig(PretrainedConfig):
         self.num_attention_heads = num_attention_heads
         self.rope_theta = rope_theta
         self.hidden_act = hidden_act
-        self.intermediate_size = intermediate_size if intermediate_size is not None else hidden_size * 4
+        self.intermediate_size = intermediate_size if intermediate_size is not None else (hidden_size * 4 if hidden_size is not None else None)
         self.num_hidden_layers = num_hidden_layers
 
 
