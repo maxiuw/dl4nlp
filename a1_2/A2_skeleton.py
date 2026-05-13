@@ -42,9 +42,9 @@ class A2MLP(nn.Module):
         assert(config.hidden_act == 'silu')
         # TODO: initalize components here
 
-        self.w1 = nn.Linear(config.hidden_size, config.intermediate_size * 2, bias=False)
-        self.w2 = nn.Linear(config.hidden_size, config.intermediate_size * 2, bias=False)
-        self.w3 = nn.Linear(config.intermediate_size*2, config.hidden_size, bias=False)
+        self.w1 = nn.Linear(config.hidden_size, config.intermediate_size, bias=False)
+        self.w2 = nn.Linear(config.hidden_size, config.intermediate_size, bias=False)
+        self.w3 = nn.Linear(config.intermediate_size, config.hidden_size, bias=False)
         self.fn = nn.SiLU()
     def forward(self, hidden_states):
         x1 = self.w1(hidden_states)
@@ -115,13 +115,9 @@ class A2DecoderLayer(nn.Module):
         self.norm2 = A2RMSNorm(config)
         
     def forward(self, hidden_states, rope_rotations):
-        attn_output = self.attention(hidden_states, rope_rotations)
-        normed_attn_output = self.norm1(attn_output)
-        combined_attn_output = hidden_states + normed_attn_output
-        mlp_output = self.mlp(combined_attn_output)
-        mlp_norm = self.norm2(mlp_output)
-        output = combined_attn_output + mlp_norm
-        return output
+        hidden_states = hidden_states + self.attention(self.norm1(hidden_states), rope_rotations)
+        hidden_states = hidden_states + self.mlp(self.norm2(hidden_states))
+        return hidden_states
 class A2Transformer(PreTrainedModel):
     """A language model based on the Transformer architecture."""
     
