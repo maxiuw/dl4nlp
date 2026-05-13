@@ -56,11 +56,9 @@ class A2MLP(nn.Module):
 # This is optional, since you can use PyTorch's RMSNorm.
 class A2RMSNorm(nn.Module):
     """RMS layer normalization."""
-    def __init__(self, config):
+    def __init__(self, config, dim=None):
         super().__init__()
-        # TODO: Use config.rms_norm_eps
-        # TODO: initalize weights here
-        self.weight = nn.Parameter(torch.ones(config.hidden_size))
+        self.weight = nn.Parameter(torch.ones(dim if dim is not None else config.hidden_size))
         self.variance_epsilon = config.rms_norm_eps
         
     def forward(self, hidden_states):
@@ -79,11 +77,13 @@ class A2Attention(nn.Module):
         self.W_Q = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         self.W_K = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         self.W_V = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
-        self.W_O = nn.Linear(config.hidden_size, config.hidden_size, bias=False) # final proj
+        self.W_O = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         self.num_attention_heads = config.num_attention_heads
         self.head_dim = config.hidden_size // config.num_attention_heads
         self.scale = self.head_dim ** -0.5
-        self.softmax = nn.Softmax(dim=-1) 
+        self.softmax = nn.Softmax(dim=-1)
+        self.q_norm = A2RMSNorm(config, dim=self.head_dim)
+        self.k_norm = A2RMSNorm(config, dim=self.head_dim)
 
     def forward(self, hidden_states, rope_rotations):
         batch_size, seq_length, hidden_size = hidden_states.size()
@@ -91,6 +91,8 @@ class A2Attention(nn.Module):
         k = self.W_K(hidden_states).view(batch_size, seq_length, self.num_attention_heads, self.head_dim).transpose(1, 2)
         v = self.W_V(hidden_states).view(batch_size, seq_length, self.num_attention_heads, self.head_dim).transpose(1, 2)
 
+        q = self.q_norm(q)
+        k = self.k_norm(k)
         q, k = apply_rotary_pos_emb(q, k, rope_rotations)
         # scale dot att from torch
         # att_out = nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=torch.triu(torch.ones(seq_length, seq_length), diagonal=1).bool().to(q.device) * float('-inf'))
@@ -202,19 +204,28 @@ class A2RotaryEmbedding(nn.Module):
             sin = emb.sin()
             return cos, sin
 
+def load_olmo2_pretrained(model_name="allenai/OLMo-2-0425-1B"):
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    print(f'Loading pretrained {model_name}...')
+    hf_tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
+    # expose .embedding so find_nearest_neighbors works
+    model.embedding = model.model.embed_tokens
+    # expose .vocab so find_nearest_neighbors works
+    hf_tokenizer.vocab = hf_tokenizer.get_vocab()
+    return model, hf_tokenizer
+
+
 if __name__ == "__main__":
-    # You can use this space for testing your code.
-    # use trainig scheme from ../a1_1/A1_skeleton.pyif __name__ == '__main__':
-    # create necessary objects and train 'train.txt' for trainign and 'val.txt' for validation
-    print('Building tokenizer...')
-    tokenizer = build_tokenizer('../a1_1/train.txt', max_voc_size=50000) #, model_max_length=256)
-    config = A2ModelConfig(vocab_size=len(tokenizer), embedding_size=256, hidden_size=768)
-    model = A2Transformer(config)
-    train_dataset = open('../a1_1/train.txt', 'r').readlines()
-    eval_dataset = open('../a1_1/val.txt', 'r').readlines()
-    # use a1 trainier for training
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--pretrained', action='store_true', help='Fine-tune from OLMo-2 instead of training from scratch')
+    parser.add_argument('--olmo-model', default='allenai/OLMo-2-0425-1B', help='OLMo-2 HuggingFace model name')
+    parser.add_argument('--resume', default=None, help='Resume from local checkpoint dir')
+    cli_args = parser.parse_args()
+
     class TrainingArguments:
-        def __init__(self, learning_rate=1e-3, num_train_epochs=10, per_device_train_batch_size=64, per_device_eval_batch_size=64, output_dir='output', optim='adamw_torch', eval_strategy='epoch', use_cpu=False):
+        def __init__(self, learning_rate=3e-4, num_train_epochs=10, per_device_train_batch_size=64, per_device_eval_batch_size=64, output_dir='output', optim='adamw_torch', eval_strategy='epoch', use_cpu=False):
             self.learning_rate = learning_rate
             self.num_train_epochs = num_train_epochs
             self.per_device_train_batch_size = per_device_train_batch_size
@@ -222,10 +233,27 @@ if __name__ == "__main__":
             self.output_dir = output_dir
             self.optim = optim
             self.eval_strategy = eval_strategy
-            self.use_cpu = use_cpu  
-    args = TrainingArguments()
+            self.use_cpu = use_cpu
+
+    train_dataset = open('../a1_1/train.txt', 'r').readlines()
+    eval_dataset = open('../a1_1/val.txt', 'r').readlines()
+
+    if cli_args.pretrained:
+        model, tokenizer = load_olmo2_pretrained(cli_args.olmo_model)
+        args = TrainingArguments(learning_rate=2e-5, per_device_train_batch_size=8, per_device_eval_batch_size=8)
+    elif cli_args.resume:
+        print(f'Resuming from {cli_args.resume}...')
+        tokenizer = build_tokenizer('../a1_1/train.txt', max_voc_size=50000)
+        model = A2Transformer.from_pretrained(cli_args.resume)
+        args = TrainingArguments()
+    else:
+        print('Building tokenizer...')
+        tokenizer = build_tokenizer('../a1_1/train.txt', max_voc_size=50000)
+        config = A2ModelConfig(vocab_size=len(tokenizer), embedding_size=256, hidden_size=768)
+        model = A2Transformer(config)
+        args = TrainingArguments()
+
     print('Training...')
     trainer = A1Trainer(model, args, train_dataset, eval_dataset, tokenizer)
     trainer.train()
-    # calculate the perplexity on the validation set and print it out
-    
+

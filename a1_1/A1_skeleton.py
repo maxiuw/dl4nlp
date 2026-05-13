@@ -1,5 +1,5 @@
 
-import torch, nltk, pickle
+import torch, nltk, pickle, math
 from torch import nn
 from collections import Counter
 from tqdm import tqdm
@@ -290,9 +290,7 @@ class A1Trainer:
         # TODO: Relevant arguments: at least args.learning_rate, but you can optionally also consider
         # other Adam-related hyperparameters here.
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=args.learning_rate)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.num_train_epochs)
 
-        # TODO: Relevant arguments: args.per_device_train_batch_size, args.per_device_eval_batch_size
         train_loader = DataLoader(
             self.train_dataset, batch_size=args.per_device_train_batch_size, shuffle=True
         )
@@ -300,26 +298,21 @@ class A1Trainer:
             self.eval_dataset, batch_size=args.per_device_eval_batch_size, shuffle=False
         )
 
-        # TODO: Your work here is to implement the training loop.
-        #       
-        # for each training epoch (use args.num_train_epochs here):
-        #   for each batch B in the training set:
-        #
-        #       PREPROCESSING AND FORWARD PASS:
-        #       input_ids = apply your tokenizer to B
-        #       labels = input_ids with padding replaced by -100
-	    #       put input_ids and labels onto the GPU (or whatever device you use)
-        #       apply the model to input_ids and labels
-        #       get the loss from the model output
-        #
-        #       BACKWARD PASS AND MODEL UPDATE:
-        #       optimizer.zero_grad()
-        #       loss.backward()
-        #       optimizer.step()
-        # for tqdm
+        num_warmup_steps = len(train_loader)          # 1 epoch warmup
+        num_training_steps = len(train_loader) * args.num_train_epochs
+
+        def lr_lambda(step):
+            if step < num_warmup_steps:
+                return step / max(1, num_warmup_steps)
+            progress = (step - num_warmup_steps) / max(1, num_training_steps - num_warmup_steps)
+            return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
+
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+        os.makedirs(args.output_dir, exist_ok=True)
+
         print('Starting training...')
-        # calculate_perplexity(self.model, self.eval_dataset, self.tokenizer, device=device) # ie does another eval loop but fine 
-        # find_nearest_neighbors(self.model, self.tokenizer, 'sweden', n=5)
+        global_step = 0
         for epoch in range(args.num_train_epochs):
             self.model.train()
             print(f'Training Epoch {epoch + 1}/{args.num_train_epochs}')
@@ -332,11 +325,15 @@ class A1Trainer:
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 optimizer.step()
+                scheduler.step()
+                global_step += 1
             self.model.eval()
-            scheduler.step()
             calculate_perplexity(self.model, self.eval_dataset, self.tokenizer, device=device)
             find_nearest_neighbors(self.model, self.tokenizer, 'sweden', n=5)
-        print(f'Saving to {args.output_dir}.')
+            epoch_dir = os.path.join(args.output_dir, f'epoch_{epoch + 1}')
+            self.model.save_pretrained(epoch_dir)
+            print(f'Checkpoint saved to {epoch_dir}.')
+        print(f'Saving final model to {args.output_dir}.')
         self.model.save_pretrained(args.output_dir)
 
     
