@@ -1,19 +1,27 @@
 from a1_2.A2_skeleton import A2ModelConfig, A2Transformer
-from a1_1.A1_skeleton import build_tokenizer, A1Trainer
+from a1_1.A1_skeleton import build_tokenizer, A1Trainer,A1RNNModel, A1RNNModelConfig
 
 
 # create necessary objects and train 'train.txt' for trainign and 'val.txt' for validation
 print('Building tokenizer...')
 tokenizer = build_tokenizer('a1_1/train.txt', max_voc_size=50000) #, model_max_length=256)
-config = A2ModelConfig(
+# config = A2ModelConfig(
+#     vocab_size=len(tokenizer),
+#     embedding_size=256,
+#     hidden_size=256,
+#     num_attention_heads=8,
+#     num_hidden_layers=4,
+#     max_position_embeddings=512,
+# )
+# model =  A2Transformer(config)
+config = A1RNNModelConfig(
     vocab_size=len(tokenizer),
     embedding_size=256,
     hidden_size=256,
-    num_attention_heads=8,
-    num_hidden_layers=4,
-    max_position_embeddings=512,
+    num_hidden_layers=2,
 )
-model = A2Transformer(config)
+
+model = A1RNNModel(config)
 train_dataset = open('a1_1/train.txt', 'r').readlines()
 eval_dataset = open('a1_1/val.txt', 'r').readlines()
 # use a1 trainier for training

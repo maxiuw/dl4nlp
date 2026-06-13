@@ -10,6 +10,8 @@ from torch.utils.data import DataLoader
 import numpy as np
 import sys, time, os
 from nltk import word_tokenize
+from sklearn.decomposition import TruncatedSVD
+import matplotlib.pyplot as plt
 nltk.download('punkt_tab')
 
 ###
@@ -175,7 +177,8 @@ class A1RNNModel(PreTrainedModel):
         """
         embedded = self.embedding(input_ids)
         rnn_out, _ = self.rnn(embedded)
-        logits = self.unembedding(rnn_out)
+        logits = self.unembedding(rnn_out)# 2. Define the GRU Cell
+
         if labels is not None:
             shift_logits = logits[:, :-1, :].contiguous()
             shift_labels = labels[:, 1:].contiguous()
@@ -230,6 +233,26 @@ def calculate_perplexity(model, eval_dataset, tokenizer, device=None):
     avg_loss = total_loss / max(total_tokens, 1)
     perplexity = np.exp(avg_loss)
     print(f'Validation Perplexity: {perplexity:.4f}')
+
+_PCA_WORDS = ['sweden', 'denmark', 'europe', 'africa', 'london', 'stockholm',
+              'large', 'small', 'great', 'black', '3', '7', '10', 'seven', 'three', 'ten',
+              '1984', '2005', '2010']
+
+def plot_embeddings_pca(emb, vocab, words, save_path=None):
+    words = [w for w in words if w in vocab]
+    vectors = np.vstack([emb.weight[vocab[w]].cpu().detach().numpy() for w in words])
+    vectors -= vectors.mean(axis=0)
+    twodim = TruncatedSVD(n_components=2).fit_transform(vectors)
+    plt.figure(figsize=(5, 5))
+    plt.scatter(twodim[:, 0], twodim[:, 1], edgecolors='k', c='r')
+    for word, (x, y) in zip(words, twodim):
+        plt.text(x + 0.02, y, word)
+    plt.axis('off')
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
 
 # another evaluation - find n nearest neighbors of a given word in the embedding space, and output these n words using cosine similarity
 def find_nearest_neighbors(model, tokenizer, word, n=5):
@@ -331,6 +354,10 @@ class A1Trainer:
             calculate_perplexity(self.model, self.eval_dataset, self.tokenizer, device=device)
             find_nearest_neighbors(self.model, self.tokenizer, 'sweden', n=5)
             epoch_dir = os.path.join(args.output_dir, f'epoch_{epoch + 1}')
+            os.makedirs(epoch_dir, exist_ok=True)
+            pca_path = os.path.join(epoch_dir, 'embeddings_pca.png')
+            plot_embeddings_pca(self.model.embedding, self.tokenizer.vocab, _PCA_WORDS, save_path=pca_path)
+            print(f'PCA plot saved to {pca_path}.')
             self.model.save_pretrained(epoch_dir)
             print(f'Checkpoint saved to {epoch_dir}.')
         print(f'Saving final model to {args.output_dir}.')
