@@ -2,5 +2,11 @@
 *.safetensors
 *.pkl
 a1_1/output
-
+*.json
+*.png
+olomo/
+epoch*/
+dl4nlp-2026/
 output/
+
+

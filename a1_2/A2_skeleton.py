@@ -204,6 +204,37 @@ class A2RotaryEmbedding(nn.Module):
             sin = emb.sin()
             return cos, sin
 
+def generate(model, tokenizer, prompt, max_length=100, temperature=1.0, topk=None):
+    model.eval()
+    device = next(model.parameters()).device
+    eos_id = tokenizer.vocab['<EOS>']
+    input_ids = tokenizer([prompt], return_tensors='pt')['input_ids'].to(device)
+    if input_ids[0, -1].item() == eos_id:
+        input_ids = input_ids[:, :-1]
+    prompt_len = input_ids.shape[1]
+
+    with torch.no_grad():
+        for _ in range(max_length):
+            logits = model(input_ids).logits[0, -1, :]
+            logits = logits / temperature
+
+            if topk is not None:
+                top_values, _ = torch.topk(logits, topk)
+                logits[logits < top_values[-1]] = float('-inf')
+
+            probs = torch.softmax(logits, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1).unsqueeze(0)
+            input_ids = torch.cat([input_ids, next_token], dim=1)
+
+            if next_token.item() == eos_id:
+                break
+
+    inv_vocab = {v: k for k, v in tokenizer.vocab.items()}
+    skip = {tokenizer.vocab['<BOS>'], tokenizer.vocab['<PAD>']}
+    tokens = [inv_vocab.get(i, '<UNK>') for i in input_ids[0, prompt_len:].tolist() if i not in skip]
+    return ' '.join(tokens)
+
+
 def load_olmo2_pretrained(model_name="allenai/OLMo-2-0425-1B"):
     from transformers import AutoModelForCausalLM, AutoTokenizer
     print(f'Loading pretrained {model_name}...')

@@ -179,6 +179,7 @@ class A1RNNModel(PreTrainedModel):
         rnn_out, _ = self.rnn(embedded)
         logits = self.unembedding(rnn_out)# 2. Define the GRU Cell
 
+        loss = None
         if labels is not None:
             shift_logits = logits[:, :-1, :].contiguous()
             shift_labels = labels[:, 1:].contiguous()
