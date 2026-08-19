@@ -3,7 +3,6 @@
 *.pkl
 a1_1/output
 *.json
-*.png
 olomo/
 *.safetensor
 dl4nlp-2026/
