@@ -3,8 +3,8 @@ from a1_2.A2_skeleton import A2ModelConfig, A2Transformer, generate, load_olmo2_
 from a1_1.A1_skeleton import build_tokenizer, A1Trainer,A1RNNModel, A1RNNModelConfig
 train = False
 gen = True
-use_olmo = True           # True: load OLMo-2; False: use local RNN checkpoint
-checkpoint = 'epoch_10'   # used when use_olmo=False; set to None for random weights
+use_olmo = False           
+checkpoint = 'epoch_transformer'   
 olmo_model_name = 'allenai/OLMo-2-0425-1B'
 olmo_local_dir = 'olomo/'  # local save dir; downloaded from HF on first run
 
@@ -27,27 +27,27 @@ else:
     # create necessary objects and train 'train.txt' for trainign and 'val.txt' for validation
     print('Building tokenizer...')
     tokenizer = build_tokenizer('a1_1/train.txt', max_voc_size=50000) #, model_max_length=256)
-    # config = A2ModelConfig(
-    #     vocab_size=len(tokenizer),
-    #     embedding_size=256,
-    #     hidden_size=256,
-    #     num_attention_heads=8,
-    #     num_hidden_layers=4,
-    #     max_position_embeddings=512,
-    # )
-    # model =  A2Transformer(config)
+    config = A2ModelConfig(
+        vocab_size=len(tokenizer),
+        embedding_size=256,
+        hidden_size=256,
+        num_attention_heads=8,
+        num_hidden_layers=4,
+        max_position_embeddings=512,
+    )
+    model =  A2Transformer.from_pretrained(checkpoint) #(config)
 
-    if checkpoint:
-        print(f'Loading model from {checkpoint}...')
-        model = A1RNNModel.from_pretrained(checkpoint)
-    else:
-        config = A1RNNModelConfig(
-            vocab_size=len(tokenizer),
-            embedding_size=256,
-            hidden_size=256,
-            num_hidden_layers=2,
-        )
-        model = A1RNNModel(config)
+    # if checkpoint:
+    #     print(f'Loading model from {checkpoint}...')
+    #     model = A1RNNModel.from_pretrained(checkpoint)
+    # else:
+    #     config = A1RNNModelConfig(
+    #         vocab_size=len(tokenizer),
+    #         embedding_size=256,
+    #         hidden_size=256,
+    #         num_hidden_layers=2,
+    #     )
+    #     model = A1RNNModel(config)
 train_dataset = open('a1_1/train.txt', 'r').readlines()
 eval_dataset = open('a1_1/val.txt', 'r').readlines()
 # use a1 trainier for training
