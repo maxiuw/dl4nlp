@@ -1,6 +1,6 @@
 import torch
 from a1_2.A2_skeleton import A2ModelConfig, A2Transformer, generate, load_olmo2_pretrained
-from a1_1.A1_skeleton import build_tokenizer, A1Trainer,A1RNNModel, A1RNNModelConfig
+from a1_1.A1_skeleton import build_tokenizer, A1Trainer,A1RNNModel, A1RNNModelConfig, predict_next_word
 train = False
 gen = True
 use_olmo = True   
@@ -91,6 +91,7 @@ elif gen:
     else:
         for prompt in prompts:
             print(f'\nPrompt: {prompt}')
+            print('next word (argmax) :', predict_next_word(model, tokenizer, prompt))
             print('temp=1.0, topk=None :', generate(model, tokenizer, prompt, max_length=50))
             print('temp=0.5, topk=10   :', generate(model, tokenizer, prompt, max_length=50, temperature=0.5, topk=10))
             print('temp=1.5, topk=50   :', generate(model, tokenizer, prompt, max_length=50, temperature=1.5, topk=50))

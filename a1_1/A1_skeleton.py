@@ -268,6 +268,20 @@ def find_nearest_neighbors(model, tokenizer, word, n=5):
     nearest_words = [list(tokenizer.vocab.keys())[list(tokenizer.vocab.values()).index(idx)] for idx in nearest_indices]
     print(f'Nearest neighbors of "{word}": {nearest_words}')
 
+def predict_next_word(model, tokenizer, text):
+    """Deterministic next-word prediction: argmax over the logits at the last real position
+       (A1 Task 5.1 / A2 Task 3.1), as opposed to the sampling done in `generate`."""
+    model.eval()
+    device = next(model.parameters()).device
+    input_ids = tokenizer([text], return_tensors='pt')['input_ids'].to(device)
+    eos_id = tokenizer.vocab['<EOS>']
+    if input_ids[0, -1].item() == eos_id:
+        input_ids = input_ids[:, :-1]
+    with torch.no_grad():
+        logits = model(input_ids).logits[0, -1, :]
+    inv_vocab = {v: k for k, v in tokenizer.vocab.items()}
+    return inv_vocab[logits.argmax().item()]
+
 class A1Trainer:
     """A minimal implementation similar to a Trainer from the HuggingFace library."""
 
