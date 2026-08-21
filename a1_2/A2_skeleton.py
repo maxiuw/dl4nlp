@@ -5,6 +5,15 @@ from transformers import PreTrainedModel, PretrainedConfig
 from a1_1.A1_skeleton import build_tokenizer, A1Trainer
 from transformers.modeling_outputs import CausalLMOutput
 
+
+# all tasks done, double check, some tasks in a runner.py
+'''
+  A2 (1.1–3.3): all done. SwiGLU MLP (1.1), RMSNorm (1.2), MHA (1.3), decoder layer (1.4), full stack (1.5), training
+  reuses A1Trainer (2.1), predict_next_word reused (3.1), sampling generate (3.2), OLMo-2 comparison via
+  load_olmo2_pretrained + runner (3.3).
+
+'''
+
 class A2ModelConfig(PretrainedConfig):
     """Configuration object that stores hyperparameters that define the Transformer language model."""
     def __init__(
@@ -40,22 +49,23 @@ class A2MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
         assert(config.hidden_act == 'silu')
-        # TODO: initalize components here
-
+        # Task 1.1: SwiGLU MLP components (two input projections + output projection).
         self.w1 = nn.Linear(config.hidden_size, config.intermediate_size, bias=False)
         self.w2 = nn.Linear(config.hidden_size, config.intermediate_size, bias=False)
         self.w3 = nn.Linear(config.intermediate_size, config.hidden_size, bias=False)
         self.fn = nn.SiLU()
     def forward(self, hidden_states):
+        # Task 1.1: SwiGLU forward - SiLU(W1 x) * (W2 x), then W3.
         x1 = self.w1(hidden_states)
         x2 = self.w2(hidden_states)
         x = self.fn(x1) * x2
         x = self.w3(x)
-        return x         
+        return x
 
 # This is optional, since you can use PyTorch's RMSNorm.
 class A2RMSNorm(nn.Module):
     """RMS layer normalization."""
+    # Task 1.2: RMSNorm (custom implementation, alternative to PyTorch's built-in).
     def __init__(self, config, dim=None):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(dim if dim is not None else config.hidden_size))
@@ -72,8 +82,7 @@ class A2Attention(nn.Module):
     
     def __init__(self, config):
         super().__init__()
-        # TODO: set up W_q, W_k, W_v, W_o here
-        # TODO: set up normalizers here
+        # Task 1.3: W_Q, W_K, W_V, W_O projections + per-head q/k RMSNorm normalizers.
         self.W_Q = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         self.W_K = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         self.W_V = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
@@ -86,21 +95,25 @@ class A2Attention(nn.Module):
         self.k_norm = A2RMSNorm(config, dim=self.head_dim)
 
     def forward(self, hidden_states, rope_rotations):
+        # Task 1.3, MHA step 1: project to q/k/v and reshape to separate attention heads.
         batch_size, seq_length, hidden_size = hidden_states.size()
         q = self.W_Q(hidden_states).view(batch_size, seq_length, self.num_attention_heads, self.head_dim).transpose(1, 2)
         k = self.W_K(hidden_states).view(batch_size, seq_length, self.num_attention_heads, self.head_dim).transpose(1, 2)
         v = self.W_V(hidden_states).view(batch_size, seq_length, self.num_attention_heads, self.head_dim).transpose(1, 2)
 
+        # Task 1.3: q/k RMSNorm, then apply RoPE rotations.
         q = self.q_norm(q)
         k = self.k_norm(k)
         q, k = apply_rotary_pos_emb(q, k, rope_rotations)
         # scale dot att from torch
         # att_out = nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=torch.triu(torch.ones(seq_length, seq_length), diagonal=1).bool().to(q.device) * float('-inf'))
-        
+
+        # Task 1.3, MHA step 2: scaled dot-product attention with causal mask (manual impl, instead of SDPA above).
         attn_weights = torch.matmul(q, k.transpose(-2, -1)) * self.scale
         attn_weights = attn_weights.masked_fill(torch.triu(torch.ones(seq_length, seq_length), diagonal=1).bool().to(attn_weights.device), float('-inf'))
         attn_probs = self.softmax(attn_weights)
         attn_output = torch.matmul(attn_probs, v)
+        # Task 1.3, MHA step 3: merge heads back and apply output projection.
         attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_length, hidden_size)
         output = self.W_O(attn_output)
         return output
@@ -110,13 +123,14 @@ class A2DecoderLayer(nn.Module):
     """A complete Transformer decoder layer."""
     def __init__(self, config):
         super().__init__()
-        # TODO: set up attention, MLP, and normalizers here.
+        # Task 1.4: attention + MLP sublayers, each with its own pre-normalizer.
         self.attention = A2Attention(config)
         self.mlp = A2MLP(config)
         self.norm1 = A2RMSNorm(config)
         self.norm2 = A2RMSNorm(config)
-        
+
     def forward(self, hidden_states, rope_rotations):
+        # Task 1.4: pre-norm attention and MLP sublayers with residual connections.
         hidden_states = hidden_states + self.attention(self.norm1(hidden_states), rope_rotations)
         hidden_states = hidden_states + self.mlp(self.norm2(hidden_states))
         return hidden_states
@@ -129,8 +143,7 @@ class A2Transformer(PreTrainedModel):
         super().__init__(config)
 
         self.rotary_emb = A2RotaryEmbedding(config)
-        # TODO: Set up the other components here.
-        # TODO: put all transformer decoder layers in a ModuleList.
+        # Task 1.5: embedding, stack of decoder layers (ModuleList), final norm, unembedding.
         self.embedding = nn.Embedding(config.vocab_size, config.hidden_size)
         self.decoder_layers = nn.ModuleList([A2DecoderLayer(config) for _ in range(config.num_hidden_layers)])
         self.norm = A2RMSNorm(config)
@@ -142,13 +155,13 @@ class A2Transformer(PreTrainedModel):
     def forward(self, input_ids, labels=None):
         rope_rotations = self.rotary_emb(input_ids) # pass this to all the transformer decoder layers
 
-        # TODO: Call embedding, transformer decoder layers, last normalizer, and unembedding.
-        # TODO: Compute the loss as in Assignment 1 if labels is not None.
+        # Task 1.5: full forward pass - embedding -> decoder stack -> final norm -> unembedding.
         hidden_states = self.embedding(input_ids)
         for layer in self.decoder_layers:
             hidden_states = layer(hidden_states, rope_rotations)
         hidden_states = self.norm(hidden_states)
-        logits = self.unembedding(hidden_states)    
+        logits = self.unembedding(hidden_states)
+        # Task 3.2 (reuses A1 Task 3.2 approach): shifted cross-entropy loss.
         loss = None
         if labels is not None:
             shift_logits = logits[:, :-1, :].contiguous()
@@ -204,6 +217,7 @@ class A2RotaryEmbedding(nn.Module):
             sin = emb.sin()
             return cos, sin
 
+# Task 3.2: random-sampling text generation with temperature scaling and top-K truncation.
 def generate(model, tokenizer, prompt, max_length=100, temperature=1.0, topk=None):
     model.eval()
     device = next(model.parameters()).device
@@ -235,6 +249,7 @@ def generate(model, tokenizer, prompt, max_length=100, temperature=1.0, topk=Non
     return ' '.join(tokens)
 
 
+# Task 3.3: load the pre-trained OLMo-2 model/tokenizer for comparison against our own Transformer.
 def load_olmo2_pretrained(model_name="allenai/OLMo-2-0425-1B"):
     from transformers import AutoModelForCausalLM, AutoTokenizer
     print(f'Loading pretrained {model_name}...')
@@ -285,6 +300,7 @@ if __name__ == "__main__":
         args = TrainingArguments()
 
     print('Training...')
+    # Task 2.1: train the Transformer LM (reusing A1Trainer) and evaluate perplexity on val set.
     trainer = A1Trainer(model, args, train_dataset, eval_dataset, tokenizer)
     trainer.train()
 

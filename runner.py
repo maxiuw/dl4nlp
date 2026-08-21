@@ -79,6 +79,7 @@ elif gen:
         'Write a Python program that reverses a list.',
     ]
     if use_olmo:
+        # Task 3.3: generate with the pre-trained OLMo-2 model for comparison against our own model's output.
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         model = model.to(device)
         model.eval()
@@ -91,7 +92,9 @@ elif gen:
     else:
         for prompt in prompts:
             print(f'\nPrompt: {prompt}')
+            # Task 5.1 (A1) / 3.1 (A2): deterministic next-word prediction (argmax).
             print('next word (argmax) :', predict_next_word(model, tokenizer, prompt))
+            # Task 3.2 (A2): sampling-based generation under different temperature/top-k settings.
             print('temp=1.0, topk=None :', generate(model, tokenizer, prompt, max_length=50))
             print('temp=0.5, topk=10   :', generate(model, tokenizer, prompt, max_length=50, temperature=0.5, topk=10))
             print('temp=1.5, topk=50   :', generate(model, tokenizer, prompt, max_length=50, temperature=1.5, topk=50))

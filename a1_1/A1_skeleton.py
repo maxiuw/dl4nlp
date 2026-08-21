@@ -14,9 +14,19 @@ from sklearn.decomposition import TruncatedSVD
 import matplotlib.pyplot as plt
 nltk.download('punkt_tab')
 
+
+# all tasks done, double check. some tasks in a runner.py
+'''
+ A1 (1.1–5.3): all done. Word split (1.1), vocab build (1.2), tokenizer __init__/__call__/__len__ (1.3), RNN model
+  (3.1), loss (3.2), trainer optim/loader/loop (4.1), predict_next_word (5.1), perplexity (5.2), nearest-neighbors + PCA
+  (5.3).
+
+'''
+
 ###
 ### Part 1. Tokenization.
 ###
+# Task 1.1: word splitting via NLTK, lowercased.
 def lowercase_tokenizer(text):
     return [t.lower() for t in word_tokenize(text)]
 
@@ -35,8 +45,8 @@ def build_tokenizer(train_file, tokenize_fun=lowercase_tokenizer, max_voc_size=N
              eos_token:         The dummy string corresponding to the end the text.
     """
 
-    # TODO: build the vocabulary, possibly truncating it to max_voc_size if that is specified.
-    # Then return a tokenizer object (implemented below).
+    # Task 1.2: build the vocabulary (str_to_int mapping), truncated to max_voc_size,
+    # keeping the most frequent tokens plus the 4 special symbols.
     f = open(train_file, 'r').read()
     counter = Counter(tokenize_fun(f))
     # sorted_tokens = list(counter.keys())
@@ -60,7 +70,7 @@ class A1Tokenizer:
     """A minimal implementation of a tokenizer similar to tokenizers in the HuggingFace library."""
 
     def __init__(self, vocab, model_max_length, pad_token_id):
-        # TODO: store all values you need in order to implement __call__ below.
+        # Task 1.3: store vocab / max length / pad id needed by __call__.
         self.pad_token_id = pad_token_id     # Compulsory attribute.
         self.model_max_length = model_max_length # Needed for truncation.
         self.vocab = vocab
@@ -77,6 +87,8 @@ class A1Tokenizer:
            Returns:
              A BatchEncoding where the field `input_ids` stores the integer-encoded texts.
         """
+        # Task 1.3:  encode texts to integer ids (with BOS/EOS/UNK), optional
+        # truncation/padding on the right, optional stacking into a PyTorch tensor.
         # tokenizer takes list of lists of strings  like this test_texts = [['This is a test.', 'Another test.']]
         tok_texts = []
         attention_masks = []
@@ -154,6 +166,7 @@ class A1RNNModel(PreTrainedModel):
     
     def __init__(self, config):
         super().__init__(config)
+        # Task 3.1: embedding -> RNN (GRU, 2 layers) -> unembedding layers.
         self.embedding = nn.Embedding(config.vocab_size, config.embedding_size)
         # self.rnn = nn.GRU(config.embedding_size, config.hidden_size, batch_first=True)
         self.rnn = nn.GRU(config.embedding_size, config.hidden_size, batch_first=True, num_layers=2, dropout=0.3) # mroe compelx for better resutls 
@@ -175,10 +188,12 @@ class A1RNNModel(PreTrainedModel):
                - logits:   The output tensor (3D), consisting of logits for all token positions for all vocabulary items.
                - loss:     The loss computed on this batch.               
         """
+        # Task 3.1: forward pass to logits.
         embedded = self.embedding(input_ids)
         rnn_out, _ = self.rnn(embedded)
         logits = self.unembedding(rnn_out)# 2. Define the GRU Cell
 
+        # Task 3.2: shift logits/labels by one position and compute cross-entropy loss.
         loss = None
         if labels is not None:
             shift_logits = logits[:, :-1, :].contiguous()
@@ -211,6 +226,7 @@ class A1RNNModel(PreTrainedModel):
 # - per_device_eval_batch_size:
 #                     The batch size to use while evaluating.
 # - output_dir:       The directory where the trained model will be saved.
+# Task 5.2: compute perplexity on a dataset (exp of average per-token cross-entropy loss).
 def calculate_perplexity(model, eval_dataset, tokenizer, device=None):
     if device is None:
         device = next(model.parameters()).device
@@ -239,6 +255,7 @@ _PCA_WORDS = ['sweden', 'denmark', 'europe', 'africa', 'london', 'stockholm',
               'large', 'small', 'great', 'black', '3', '7', '10', 'seven', 'three', 'ten',
               '1984', '2005', '2010']
 
+# Task 5.3: visualize learned word embeddings (PCA/SVD to 2D scatterplot).
 def plot_embeddings_pca(emb, vocab, words, save_path=None):
     words = [w for w in words if w in vocab]
     vectors = np.vstack([emb.weight[vocab[w]].cpu().detach().numpy() for w in words])
@@ -255,6 +272,7 @@ def plot_embeddings_pca(emb, vocab, words, save_path=None):
     else:
         plt.show()
 
+# Task 5.3: nearest neighbors of a word's embedding via cosine similarity.
 # another evaluation - find n nearest neighbors of a given word in the embedding space, and output these n words using cosine similarity
 def find_nearest_neighbors(model, tokenizer, word, n=5):
     if word not in tokenizer.vocab:
@@ -325,10 +343,12 @@ class A1Trainer:
         
         # loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
 
+        # Task 4.1: optimizer (AdamW).
         # TODO: Relevant arguments: at least args.learning_rate, but you can optionally also consider
         # other Adam-related hyperparameters here.
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=args.learning_rate)
 
+        # Task 4.1: DataLoaders for train/val sets.
         train_loader = DataLoader(
             self.train_dataset, batch_size=args.per_device_train_batch_size, shuffle=True
         )
@@ -354,6 +374,7 @@ class A1Trainer:
         for epoch in range(args.num_train_epochs):
             self.model.train()
             print(f'Training Epoch {epoch + 1}/{args.num_train_epochs}')
+            # Task 4.1: training loop - tokenize batch, mask padding out of the loss via -100, forward/backward/step.
             for batch in tqdm(train_loader, desc=f'Train epoch {epoch + 1}/{args.num_train_epochs}', unit='batch'):
                 input_ids = self.tokenizer(batch, truncation=True, padding=True, return_tensors='pt')['input_ids'].to(device)
                 labels = input_ids.clone()
